@@ -177,19 +177,26 @@ void implicit_stencil_serial(double a, double *x1, double *x2, int N) {
  * @param n   The number of processors to parallelize the computation over
  */
 void implicit_stencil_parallel(double a, double *x1, double *x2, int N, int n) {
-    int k = N/n; // Size of each partition
-
     struct tridiag_t interface_sys;
     interface_sys.n = 2*n;
     interface_sys.A = malloc(interface_sys.n * sizeof(struct tridiag_row_t));
     interface_sys.x = malloc(interface_sys.n * sizeof(double));
 
-    #pragma omp parallel shared(interface_sys, x1, x2) 
+    #pragma omp parallel shared(interface_sys, x1, x2)
     {
         // Compute the interface equations on each processor
         #pragma omp for schedule(static)
         for (int partition = 0; partition < n; partition++) {
-            int start = partition*k; // The first row of this partition
+            // Divide the matrix as evenly as possible among the processors
+            int k = N/n;
+            int remainder = N - k*n;
+            int start = k*partition;
+            if (partition < remainder) {
+                start += partition;
+                k++;
+            } else {
+                start += remainder;
+            }
 
             struct tridiag_row_t *upper = &interface_sys.A[partition*2];
             struct tridiag_row_t *lower = &interface_sys.A[partition*2+1];
@@ -229,8 +236,19 @@ void implicit_stencil_parallel(double a, double *x1, double *x2, int N, int n) {
         // Distribution the solution of the interface system back among the processors
         #pragma omp for schedule(static)
         for (int partition = 0; partition < n; partition++) {
-            x1[partition*k]           = interface_sys.x[2*partition];
-            x1[(partition + 1)*k - 1] = interface_sys.x[2*partition + 1];
+            // Divide the matrix as evenly as possible among the processors
+            int k = N/n;
+            int remainder = N - k*n;
+            int start = k*partition;
+            if (partition < remainder) {
+                start += partition;
+                k++;
+            } else {
+                start += remainder;
+            }
+
+            x1[start]        = interface_sys.x[2*partition];
+            x1[start + k -1] = interface_sys.x[2*partition + 1];
 
             // Solve the n independent tridiagonal k x k systems of the form
             // |    1                                  | |  x2_1  |   |  x1_1  |
@@ -239,13 +257,13 @@ void implicit_stencil_parallel(double a, double *x1, double *x2, int N, int n) {
             // |                  .....                | |  ...   |   |  ...   |
             // |                       -a   (1-2a)  -a | |x2_(k-1)|   |x1_(k-1)|
             // |                                     1 | |  x2_k  |   |  x1_k  |
-            x1[partition*k+1] += a*x1[partition*k];
-            x1[(partition+1)*k-2] += a*x1[(partition+1)*k-1];
-            x2[partition*k] = x1[partition*k];
-            x2[(partition+1)*k-1] = x1[(partition+1)*k-1];
+            x1[start+1] += a*x1[start];
+            x1[start+k-2] += a*x1[start+k-1];
+            x2[start] = x1[start];
+            x2[start+k-1] = x1[start+k-1];
 
-            double *x1_part = &x1[partition*k + 1];
-            double *x2_part = &x2[partition*k + 1];
+            double *x1_part = &x1[start + 1];
+            double *x2_part = &x2[start + 1];
             implicit_stencil_serial(a, x1_part, x2_part, k-2);
         }
     }
@@ -255,46 +273,24 @@ void implicit_stencil_parallel(double a, double *x1, double *x2, int N, int n) {
 
 
 int main() {
-    int n = 1<<27;
-    //int n = 32;
+    int n = 1<<5;
     double a = 0.2;
-    double *x = malloc(sizeof(double)*n);
-    assert(x);
-
-    struct tridiag_t system;
-    system.A = malloc(sizeof(struct tridiag_row_t)*n);
-    assert(system.A);
-    system.n = n;
-
-    #pragma omp parallel for
-    for (int i = 0; i < n; i++) {
-        system.A[i].a = -a;
-        system.A[i].b = 1-2*a;
-        system.A[i].c = -a;
-        system.A[i].d = (i < n/2) ? ((double) (i+1))/(n+1) : 1.0 - ((double) (i+1))/(n+1);
-    }
-    system.A[0].a = 0;
-    system.A[n-1].c = 0;
-
     double *x1 = malloc(sizeof(double)*n);
     double *x2 = malloc(sizeof(double)*n);
+
     #pragma omp parallel for
     for (int i = 0; i < n; i++) {
         x1[i] = (i < n/2) ? ((double) (i+1))/(n+1) : 1.0 - ((double) (i+1))/(n+1);
     }
 
-
     printf("Running parallel solver\n");
     double start = omp_get_wtime();
-    implicit_stencil_parallel(0.2, x1, x2, n, 1<<12);
-    //implicit_stencil_serial(0.2, x1, x2, n);
-    //parallel_thomas(system, x2, 1<<8);
-    //inplace_thomas(system, x2);
+    implicit_stencil_parallel(0.2, x1, x2, n, 5);
     double total = omp_get_wtime() - start;
 
     printf("%0.4f: Total time = %f\n", x2[n/2], total);
 
-    // for (int i = 0; i < n; i++) {
-    //     printf("%0.5f\n", x2[i]);
-    // }
+    for (int i = 0; i < n; i++) {
+        printf("%0.5f\n", x2[i]);
+    }
 }
