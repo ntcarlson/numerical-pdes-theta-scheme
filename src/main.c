@@ -12,11 +12,13 @@ struct tridiag_row_t {
 
 struct tridiag_t {
     struct tridiag_row_t *A;
+    double *x;
     size_t n;
 };
 
-void inplace_thomas(struct tridiag_t system, double *x) {
+void inplace_thomas(struct tridiag_t system) {
     struct tridiag_row_t *A = system.A;
+    double *x = system.x;
     size_t n = system.n;
 
     // Forward reduction
@@ -53,6 +55,7 @@ void parallel_thomas(struct tridiag_t system, double *x, int n_part) {
     struct tridiag_t interface_sys;
     interface_sys.A = malloc(sizeof(struct tridiag_row_t)*n_part*2);
     interface_sys.n = 2*n_part;
+    interface_sys.x = malloc(interface_sys.n*sizeof(double));
 
     #pragma omp parallel shared(interface_sys) num_threads(n_part)
     {
@@ -92,15 +95,7 @@ void parallel_thomas(struct tridiag_t system, double *x, int n_part) {
         // Collect and solve the interface equation on the master thread
         #pragma omp barrier
         if (omp_get_thread_num() == 0) {
-            printf("Interface system\n");
-            for (int j = 0; j < interface_sys.n; j++) {
-                printf("%0.4f %0.4f %0.4f %0.4f\n",
-                interface_sys.A[j].a,
-                interface_sys.A[j].b,
-                interface_sys.A[j].c,
-                interface_sys.A[j].d);
-            }
-         inplace_thomas(interface_sys, x);
+            inplace_thomas(interface_sys);
         }
         #pragma omp barrier
 
@@ -110,19 +105,19 @@ void parallel_thomas(struct tridiag_t system, double *x, int n_part) {
             system.A[partition*part_size].a = 0;
             system.A[partition*part_size].b = 1;
             system.A[partition*part_size].c = 0;
-            system.A[partition*part_size].d = x[2*partition];
+            system.A[partition*part_size].d = interface_sys.x[2*partition];
 
             system.A[(partition + 1)*part_size - 1].a = 0;
             system.A[(partition + 1)*part_size - 1].b = 1;
             system.A[(partition + 1)*part_size - 1].c = 0;
-            system.A[(partition + 1)*part_size - 1].d = x[2*partition + 1];
+            system.A[(partition + 1)*part_size - 1].d = interface_sys.x[2*partition + 1];
 
             // Solve the independent tridiagonal systems
             struct tridiag_t sub_sys;
             sub_sys.n = part_size;
             sub_sys.A = &system.A[partition*part_size];
-            double *sub_x = &x[partition*part_size];
-            inplace_thomas(sub_sys, sub_x);
+            sub_sys.x = &x[partition*part_size];
+            inplace_thomas(sub_sys);
         }
     }
 }
@@ -187,8 +182,9 @@ void implicit_stencil_parallel(double a, double *x1, double *x2, int N, int n) {
     struct tridiag_t interface_sys;
     interface_sys.n = 2*n;
     interface_sys.A = malloc(interface_sys.n * sizeof(struct tridiag_row_t));
+    interface_sys.x = malloc(interface_sys.n * sizeof(double));
 
-    #pragma omp parallel shared(interface_sys, x1, x2) num_threads(n)
+    #pragma omp parallel shared(interface_sys, x1, x2) 
     {
         // Compute the interface equations on each processor
         #pragma omp for schedule(static)
@@ -220,30 +216,21 @@ void implicit_stencil_parallel(double a, double *x1, double *x2, int N, int n) {
                 lower->b = (1-2*a) - alpha*lower->c;
                 lower->d = x1[i] - alpha*lower->d;
             }
-            if (partition == k-1) upper->c = 0;
+            if (partition == n-1) lower->c = 0;
         }
 
         // Collect and solve the interface system on the master thread
         #pragma omp barrier
         if (omp_get_thread_num() == 0) {
-            printf("Interface system\n");
-            for (int j = 0; j < interface_sys.n; j++) {
-                printf("%0.4f %0.4f %0.4f %0.4f\n",
-                interface_sys.A[j].a,
-                interface_sys.A[j].b,
-                interface_sys.A[j].c,
-                interface_sys.A[j].d);
-            }
-            inplace_thomas(interface_sys, x2);
+            inplace_thomas(interface_sys);
         }
         #pragma omp barrier
 
         // Distribution the solution of the interface system back among the processors
         #pragma omp for schedule(static)
         for (int partition = 0; partition < n; partition++) {
-
-            x1[partition*k]           = x2[2*partition];
-            x1[(partition + 1)*k - 1] = x2[2*partition + 1];
+            x1[partition*k]           = interface_sys.x[2*partition];
+            x1[(partition + 1)*k - 1] = interface_sys.x[2*partition + 1];
 
             // Solve the n independent tridiagonal k x k systems of the form
             // |    1                                  | |  x2_1  |   |  x1_1  |
@@ -262,12 +249,14 @@ void implicit_stencil_parallel(double a, double *x1, double *x2, int N, int n) {
             implicit_stencil_serial(a, x1_part, x2_part, k-2);
         }
     }
+    free(interface_sys.A);
+    free(interface_sys.x);
 }
 
 
 int main() {
-    //int n = 1<<12;
-    int n = 16;
+    int n = 1<<27;
+    //int n = 32;
     double a = 0.2;
     double *x = malloc(sizeof(double)*n);
     assert(x);
@@ -297,15 +286,15 @@ int main() {
 
     printf("Running parallel solver\n");
     double start = omp_get_wtime();
-    implicit_stencil_parallel(0.2, x1, x2, n, 2);
+    implicit_stencil_parallel(0.2, x1, x2, n, 1<<12);
     //implicit_stencil_serial(0.2, x1, x2, n);
-    //parallel_thomas(system, x2, 1);
-    //inplace_thomas(system, x);
+    //parallel_thomas(system, x2, 1<<8);
+    //inplace_thomas(system, x2);
     double total = omp_get_wtime() - start;
 
-    //printf("%0.4f: Total time = %f\n", x[n-1], total);
+    printf("%0.4f: Total time = %f\n", x2[n/2], total);
 
-    for (int i = 0; i < n; i++) {
-        printf("%0.5f\n", x2[i]);
-    }
+    // for (int i = 0; i < n; i++) {
+    //     printf("%0.5f\n", x2[i]);
+    // }
 }
