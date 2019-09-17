@@ -10,4 +10,4 @@ struct bvp_t {
 };
 
 void explicit_step(double a, double *U1, double *U2, int N);
-void theta_scheme(struct bvp_t bvp);
+double theta_scheme(struct bvp_t bvp, double (*u)(double,double));

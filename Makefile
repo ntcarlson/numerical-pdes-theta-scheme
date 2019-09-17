@@ -1,5 +1,5 @@
 CC := gcc
-CFLAGS := -Wall -O3 -fopenmp
+CFLAGS := -Wall -O3 -fopenmp -lm
 OBJFLAGS := $(CFLAGS) -c 
 INC := -I include
 
@@ -19,7 +19,7 @@ all: $(TARGET)
 $(TARGET): $(OBJECTS)
 	@echo -e "Linking"
 	@mkdir -p $$(dirname $@)
-	$(CC) $(INC) -fopenmp $^ -o $@
+	$(CC) $(INC) -fopenmp -lm $^ -o $@
 
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c
 	@mkdir -p $$(dirname $@)
