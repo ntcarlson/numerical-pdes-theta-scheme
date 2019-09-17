@@ -4,7 +4,7 @@
 #include <math.h>
 #include "theta_scheme.h"
 
-#define NUM_TERMS 4
+#define NUM_TERMS 5
 
 double initial_condition(double x) {
     return x*(1-x);
@@ -20,7 +20,7 @@ double exact_solution(double x, double t) {
 }
 
 int main() {
-    int max_J = 200;
+    int max_J = 80;
     struct bvp_t bvp;
     bvp.IC = initial_condition;
     bvp.stop_time = 1;
@@ -28,37 +28,39 @@ int main() {
         FILE *fp = fopen("analysis/1.txt", "w"); 
         bvp.theta = 0;
         double mu = 0.5;
-        for (bvp.J = 10; bvp.J <= max_J; bvp.J += 10) {
+        for (bvp.J = 10; bvp.J <= max_J; bvp.J += 2) {
             double dx = 1.0/((double) bvp.J);
             bvp.dt = mu*dx*dx;
             double err = theta_scheme(bvp, exact_solution);
-            fprintf(fp, "%d\t%0.9f\n", bvp.J, log10(err));
+            fprintf(fp, "%d\t%f\t%0.9f\n", bvp.J, bvp.J/bvp.dt, log10(err));
         }
         fclose(fp);
     }
 
+    printf("\n");
     { // theta = 1, mu = 5
         FILE *fp = fopen("analysis/2.txt", "w"); 
         bvp.theta = 1;
         double mu = 5;
-        for (bvp.J = 10; bvp.J <= max_J; bvp.J += 10) {
+        for (bvp.J = 10; bvp.J <= max_J; bvp.J += 2) {
             double dx = 1.0/((double) bvp.J);
             bvp.dt = mu*dx*dx;
             double err = theta_scheme(bvp, exact_solution);
-            fprintf(fp, "%d\t%0.9f\n", bvp.J, log10(err));
+            fprintf(fp, "%d\t%f\t%0.9f\n", bvp.J, bvp.J/bvp.dt, log10(err));
         }
         fclose(fp);
     }
 
+    printf("\n");
     { // theta = 0.5, nu = 1/20
         FILE *fp = fopen("analysis/3.txt", "w"); 
         bvp.theta = 0.5;
         double nu = 0.05;
-        for (bvp.J = 10; bvp.J <= max_J; bvp.J += 10) {
+        for (bvp.J = 10; bvp.J <= max_J; bvp.J += 2) {
             double dx = 1.0/((double) bvp.J);
             bvp.dt = nu*dx;
             double err = theta_scheme(bvp, exact_solution);
-            fprintf(fp, "%d\t%0.9f\n", bvp.J, log10(err));
+            fprintf(fp, "%d\t%f\t%0.9f\n", bvp.J, bvp.J/bvp.dt, log10(err));
         }
         fclose(fp);
     }
