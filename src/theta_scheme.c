@@ -31,19 +31,45 @@ double max_error(struct bvp_t bvp, double *U, double (*u)(double, double), doubl
         #pragma omp for reduction(max : error)
         for (int i = 0; i <= bvp.J; i++) {
             double x = ((double) i)/bvp.J;
-            error = fabs(U[i] - u(x,t));
+            error = fmax(error, fabs(U[i] - u(x,t)));
         }
     }
     return error;
 }
 
-double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
-    int N = bvp.J+1;
-    double *U1 = malloc(sizeof(double)*N);
-    double *U2 = malloc(sizeof(double)*N);
-
+void forward_euler_step(struct bvp_t bvp, double **U1, double **U2) {
     double dx = 1.0/bvp.J;
     double mu = bvp.dt/(dx*dx);
+    int N = bvp.J+1;
+    explicit_step(mu, *U1, *U2, N);
+    double * tmp = *U2;
+    *U2 = *U1;
+    *U1 = tmp;
+}
+
+void backward_euler_step(struct bvp_t bvp, double **U1, double **U2) {
+    double dx = 1.0/bvp.J;
+    double mu = bvp.dt/(dx*dx);
+    int N = bvp.J+1;
+    implicit_step_parallel(mu, (*U1)+1, (*U2)+1, N-2, (int) sqrt(N));
+    double * tmp = *U2;
+    *U2 = *U1;
+    *U1 = tmp;
+}
+
+void theta_scheme_step(struct bvp_t bvp, double **U1, double **U2) {
+    double dx = 1.0/bvp.J;
+    double mu = bvp.dt/(dx*dx);
+    int N = bvp.J+1;
+    explicit_step((1-bvp.theta)*mu, *U1, *U2, N);
+    implicit_step_parallel(bvp.theta*mu, (*U2)+1, (*U1)+1, N-2, (int) sqrt(N));
+}
+
+double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
+    int N = bvp.J+1;
+    double dx = 1.0/bvp.J;
+    double *U1 = malloc(sizeof(double)*N);
+    double *U2 = malloc(sizeof(double)*N);
 
     // Apply initial conditions
     U1[0]   = 0;
@@ -53,61 +79,33 @@ double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
         U1[i] = bvp.IC(i*dx);
     }
     
+    void (*step_method)(struct bvp_t, double **, double **);
+    if (bvp.theta == 0) {
+        printf("Running forward Euler  (J = %d, dt = %f) : ", bvp.J, bvp.dt);
+        step_method = forward_euler_step;
+    } else if (bvp.theta == 1) {
+        printf("Running backward Euler (J = %d, dt = %f) : ", bvp.J, bvp.dt);
+        step_method = backward_euler_step;
+    } else {
+        printf("Running θ-scheme (θ = %0.2f, J = %d, dt = %0.5f) : ", bvp.theta, bvp.J, bvp.dt);
+        step_method = theta_scheme_step;
+    }
+
     double t = 0;
     double start_time = omp_get_wtime();
     double max_err = 0;
-    if (bvp.theta == 0) {
-        printf("Using forward Euler scheme . . . ");
-        // Forward Euler method
-        while (t < bvp.stop_time) {
-            explicit_step(mu, U1, U2, N);
-            double * tmp = U2;
-            U2 = U1;
-            U1 = tmp;
-            if (t > 0.1) {
-                double err = max_error(bvp, U1, u, t);
-                if (err > max_err) {
-                    max_err = err;
-                }
+    while (t < bvp.stop_time) {
+        step_method(bvp, &U1, &U2);
+        if (t > 0.1 -bvp.dt) {
+            double err = max_error(bvp, U1, u, t);
+            if (err > max_err) {
+                max_err = err;
             }
-
-            t +=  bvp.dt;
         }
-    } else if (bvp.theta == 1) {
-        printf("Using backward Euler scheme . . . ");
-        // Backward Euler method
-        while (t < bvp.stop_time) {
-            implicit_step_parallel(mu, U1+1, U2+1, N-2, (int) sqrt(N));
-            double * tmp = U2;
-            U2 = U1;
-            U1 = tmp;
-            if (t > 0.1) {
-                double err = max_error(bvp, U1, u, t);
-                if (err > max_err) {
-                    max_err = err;
-                }
-            }
-
-            t +=  bvp.dt;
-        }
-    } else {
-        // Theta scheme
-        printf("Using theta scheme (theta = %0.2f) . . . ", bvp.theta);
-        while (t < bvp.stop_time) {
-            explicit_step((1-bvp.theta)*mu, U1, U2, N);
-            implicit_step_parallel(bvp.theta*mu, U2+1, U1+1, N-2, (int) sqrt(N));
-            if (t > 0.1) {
-                double err = max_error(bvp, U1, u, t);
-                if (err > max_err) {
-                    max_err = err;
-                }
-            }
-
-            t +=  bvp.dt;
-        }
+        t +=  bvp.dt;
     }
     double total_time = omp_get_wtime() - start_time;
-    printf("Computed %d timesteps in %f seconds\n", (int) (bvp.stop_time/bvp.dt), total_time);
+    printf("%d timesteps in %f sec\n", (int) (bvp.stop_time/bvp.dt), total_time);
 
     free(U1);
     free(U2);

@@ -1,0 +1,4 @@
+bin/
+build/
+analysis/*.txt
+analysis/*.pdf
