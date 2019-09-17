@@ -57,7 +57,7 @@ double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
     double start_time = omp_get_wtime();
     double max_err = 0;
     if (bvp.theta == 0) {
-        printf("Using forward Euler scheme\n");
+        printf("Using forward Euler scheme . . . ");
         // Forward Euler method
         while (t < bvp.stop_time) {
             explicit_step(mu, U1, U2, N);
@@ -74,10 +74,10 @@ double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
             t +=  bvp.dt;
         }
     } else if (bvp.theta == 1) {
-        printf("Using backward Euler scheme\n");
+        printf("Using backward Euler scheme . . . ");
         // Backward Euler method
         while (t < bvp.stop_time) {
-            implicit_step_parallel(mu, U1+1, U2+1, N-2, 8);
+            implicit_step_parallel(mu, U1+1, U2+1, N-2, (int) sqrt(N));
             double * tmp = U2;
             U2 = U1;
             U1 = tmp;
@@ -92,10 +92,10 @@ double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
         }
     } else {
         // Theta scheme
-        printf("Using theta scheme (theta = %0.2f)\n", bvp.theta);
+        printf("Using theta scheme (theta = %0.2f) . . . ", bvp.theta);
         while (t < bvp.stop_time) {
             explicit_step((1-bvp.theta)*mu, U1, U2, N);
-            implicit_step_parallel(bvp.theta*mu, U2+1, U1+1, N-2, 8);
+            implicit_step_parallel(bvp.theta*mu, U2+1, U1+1, N-2, (int) sqrt(N));
             if (t > 0.1) {
                 double err = max_error(bvp, U1, u, t);
                 if (err > max_err) {
@@ -111,5 +111,6 @@ double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
 
     free(U1);
     free(U2);
+
     return max_err;
 }

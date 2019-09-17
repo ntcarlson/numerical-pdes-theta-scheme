@@ -3,6 +3,8 @@ CFLAGS := -Wall -O3 -fopenmp -lm
 OBJFLAGS := $(CFLAGS) -c 
 INC := -I include
 
+SHELL:=/bin/bash
+
 SRCDIR := src
 BUILDDIR := build
 TARGET := bin/theta-method
@@ -14,7 +16,11 @@ DEPS := $(OBJECTS:%.o=%.d)
 .SECONDEXPANSION:
 .PHONY: clean
 
-all: $(TARGET)
+all: $(TARGET) 
+
+run: $(TARGET)
+	@$(TARGET)
+	@cd analysis; gnuplot error.plot
 
 $(TARGET): $(OBJECTS)
 	@echo -e "Linking"
