@@ -40,11 +40,12 @@ void inplace_thomas(struct tridiag_t system) {
 
 /**
  * Solve Ax_2 = x_1 in serial using Thomas algorithm where A is the tridiagonal matrix
- *     | (1+2a)   -a                        |
- *     |   -a   (1+2a)  -a                  |
- * A = |          -a   (1+2a)  -a           |
- *     |                  .....             |
- *     |                        -a   (1+2a) |
+ *     |    1                                    |
+ *     |   -a   (1+2a)  -a                       |
+ * A = |          -a   (1+2a)  -a                |
+ *     |                  .....                  |
+ *     |                       -a   (1+2a)   -a  |
+ *     |                                      1  |
  * that arises from applying the backward Euler stencil.
  * 
  * Knowing the form of the matrix a priori saves the memory needed to store
@@ -56,28 +57,34 @@ void inplace_thomas(struct tridiag_t system) {
  * @param N   The dimension of the the system
  */
 void implicit_step_serial(double a, double *x1, double *x2, int N) {
-    x2[0] = 1+2*a; // Reuse memory to store the diagonal of A
+    x1[1] += a*x1[0];
+    x1[N-2] += a*x1[N-1];
+    x2[0] = x1[0];
+    x2[N-1] = x1[N-1];
+
+    x2[1] = 1+2*a; // Reuse memory to store the diagonal of A
     // Forward reduction. Not vectorizable -- read after write data dependency
-    for (int i = 1; i < N; i++) {
+    for (int i = 2; i < N-1; i++) {
         double w = -a/x2[i-1];
         x2[i] = (1+2*a) + w*a;
         x1[i] -= w*x1[i-1];
     }
 
     // Backward substitution. Again, not vectorizable
-    x2[N-1] = x1[N-1]/x2[N-1];
-    for (int i = N - 2; i >= 0; i--) {
+    x2[N-2] = x1[N-2]/x2[N-2];
+    for (int i = N - 3; i > 0; i--) {
         x2[i] = (x1[i] + a*x2[i+1])/x2[i];
     }
 }
 
 /**
  * Solve Ax_2 = x_1 in parallel where A is the tridiagonal matrix
- *     | (1+2a)   -a                        |
- *     |   -a   (1+2a)  -a                  |
- * A = |          -a   (1+2a)   -a          |
- *     |                  .....             |
- *     |                        -a   (1+2a) |
+ *     |    1                                    |
+ *     |   -a   (1+2a)  -a                       |
+ * A = |          -a   (1+2a)  -a                |
+ *     |                  .....                  |
+ *     |                       -a   (1+2a)   -a  |
+ *     |                                      1  |
  * that arises from applying the backward Euler stencil.
  * 
  * The algorithm is based off of an adaptation of the Thomas algorithm presented
@@ -129,7 +136,12 @@ void implicit_step_parallel(double a, double *x1, double *x2, int N, int n) {
                 upper->c = - beta*upper->c;
                 upper->b = (1+2*a) - beta*upper->a;
             }
-            if (partition == 0) upper->a = 0;
+            if (partition == 0) {
+                upper->a = 0;
+                upper->b = 1;
+                upper->c = 0;
+                upper->d = x1[0];
+            }
 
             lower->a = -a;
             lower->b = 1+2*a;
@@ -141,7 +153,12 @@ void implicit_step_parallel(double a, double *x1, double *x2, int N, int n) {
                 lower->b = (1+2*a) - alpha*lower->c;
                 lower->d = x1[i] - alpha*lower->d;
             }
-            if (partition == n-1) lower->c = 0;
+            if (partition == n-1) {
+                lower->a = 0;
+                lower->b = 1;
+                lower->c = 0;
+                lower->d = x1[N-1];
+            }
         }
 
         // Collect and solve the interface system on the master thread
@@ -151,7 +168,7 @@ void implicit_step_parallel(double a, double *x1, double *x2, int N, int n) {
         }
         #pragma omp barrier
 
-        // Distribution the solution of the interface system back among the processors
+        // Distribute the solution of the interface system back among the processors
         #pragma omp for schedule(static)
         for (int partition = 0; partition < n; partition++) {
             // Divide the matrix as evenly as possible among the processors
@@ -168,21 +185,11 @@ void implicit_step_parallel(double a, double *x1, double *x2, int N, int n) {
             x1[start]        = interface_sys.x[2*partition];
             x1[start + k -1] = interface_sys.x[2*partition + 1];
 
-            // Solve the n independent tridiagonal k x k systems of the form
-            // |    1                                  | |  x2_1  |   |  x1_1  |
-            // |   -a   (1+2a)  -a                     | |  x2_2  |   |  x1_2  |
-            // |          -a   (1+2a)  -a              | |  x2_3  | = |  x1_3  |
-            // |                  .....                | |  ...   |   |  ...   |
-            // |                       -a   (1+2a)  -a | |x2_(k-1)|   |x1_(k-1)|
-            // |                                     1 | |  x2_k  |   |  x1_k  |
-            x1[start+1] += a*x1[start];
-            x1[start+k-2] += a*x1[start+k-1];
-            x2[start] = x1[start];
-            x2[start+k-1] = x1[start+k-1];
-
-            double *x1_part = &x1[start + 1];
-            double *x2_part = &x2[start + 1];
-            implicit_step_serial(a, x1_part, x2_part, k-2);
+            // Solve the n independent tridiagonal k x k systems which now have
+            // the same form as the original system
+            double *x1_part = &x1[start];
+            double *x2_part = &x2[start];
+            implicit_step_serial(a, x1_part, x2_part, k);
         }
     }
     free(interface_sys.A);

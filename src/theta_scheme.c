@@ -29,7 +29,7 @@ double max_error(struct bvp_t bvp, double *U, double (*u)(double, double), doubl
     #pragma omp parallel shared(error)
     {
         #pragma omp for reduction(max : error)
-        for (int i = 0; i <= bvp.J; i++) {
+        for (int i = 1; i < bvp.J; i++) {
             double x = ((double) i)/bvp.J;
             error = fmax(error, fabs(U[i] - u(x,t)));
         }
@@ -51,7 +51,7 @@ void backward_euler_step(struct bvp_t bvp, double **U1, double **U2) {
     double dx = 1.0/bvp.J;
     double mu = bvp.dt/(dx*dx);
     int N = bvp.J+1;
-    implicit_step_parallel(mu, (*U1)+1, (*U2)+1, N-2, (int) sqrt(N));
+    implicit_step_parallel(mu, *U1, *U2, N, (int) sqrt(N));
     double * tmp = *U2;
     *U2 = *U1;
     *U1 = tmp;
@@ -62,7 +62,7 @@ void theta_scheme_step(struct bvp_t bvp, double **U1, double **U2) {
     double mu = bvp.dt/(dx*dx);
     int N = bvp.J+1;
     explicit_step((1-bvp.theta)*mu, *U1, *U2, N);
-    implicit_step_parallel(bvp.theta*mu, (*U2)+1, (*U1)+1, N-2, (int) sqrt(N));
+    implicit_step_parallel(bvp.theta*mu, *U2, *U1, N, (int) sqrt(N));
 }
 
 double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
@@ -91,16 +91,13 @@ double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
         step_method = theta_scheme_step;
     }
 
-    double t = 0;
+    double t = bvp.dt;
     double start_time = omp_get_wtime();
-    double max_err = 0;
+    double err = 0;
     while (t < bvp.stop_time) {
         step_method(bvp, &U1, &U2);
-        if (t > 0.1 -bvp.dt) {
-            double err = max_error(bvp, U1, u, t);
-            if (err > max_err) {
-                max_err = err;
-            }
+        if (t > 0.1) {
+            err = fmax(max_error(bvp, U1, u, t), err);
         }
         t +=  bvp.dt;
     }
@@ -110,5 +107,5 @@ double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
     free(U1);
     free(U2);
 
-    return max_err;
+    return err;
 }
