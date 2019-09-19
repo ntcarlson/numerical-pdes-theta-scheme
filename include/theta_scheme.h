@@ -11,3 +11,4 @@ struct bvp_t {
 
 void explicit_step(double a, double *U1, double *U2, int N);
 double theta_scheme(struct bvp_t bvp, double (*u)(double,double));
+void plot_solution(struct bvp_t bvp, double (*u)(double, double), char *filename);

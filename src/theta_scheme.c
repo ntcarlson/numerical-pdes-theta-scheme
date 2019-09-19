@@ -81,13 +81,13 @@ double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
     
     void (*step_method)(struct bvp_t, double **, double **);
     if (bvp.theta == 0) {
-        printf("Running forward Euler  (J = %d, dt = %f) : ", bvp.J, bvp.dt);
+        printf("Running forward Euler  (J = %ld, dt = %f) : ", bvp.J, bvp.dt);
         step_method = forward_euler_step;
     } else if (bvp.theta == 1) {
-        printf("Running backward Euler (J = %d, dt = %f) : ", bvp.J, bvp.dt);
+        printf("Running backward Euler (J = %ld, dt = %f) : ", bvp.J, bvp.dt);
         step_method = backward_euler_step;
     } else {
-        printf("Running θ-scheme (θ = %0.2f, J = %d, dt = %0.5f) : ", bvp.theta, bvp.J, bvp.dt);
+        printf("Running θ-scheme (θ = %0.2f, J = %ld, dt = %0.5f) : ", bvp.theta, bvp.J, bvp.dt);
         step_method = theta_scheme_step;
     }
 
@@ -108,4 +108,44 @@ double theta_scheme(struct bvp_t bvp, double (*u)(double, double)) {
     free(U2);
 
     return err;
+}
+
+void plot_solution(struct bvp_t bvp, double (*u)(double, double), char *filename) {
+    int N = bvp.J+1;
+    double dx = 1.0/bvp.J;
+    double *U1 = malloc(sizeof(double)*N);
+    double *U2 = malloc(sizeof(double)*N);
+
+    // Apply initial conditions
+    U1[0]   = 0;
+    U1[N-1] = 0;
+    #pragma omp parallel for schedule(static)
+    for (int i = 1; i < N-1; i++) {
+        U1[i] = bvp.IC(i*dx);
+    }
+    
+    void (*step_method)(struct bvp_t, double **, double **);
+    if (bvp.theta == 0) {
+        step_method = forward_euler_step;
+    } else if (bvp.theta == 1) {
+        step_method = backward_euler_step;
+    } else {
+        step_method = theta_scheme_step;
+    }
+
+    double t = bvp.dt;
+    while (t < bvp.stop_time) {
+        step_method(bvp, &U1, &U2);
+        t += bvp.dt;
+    }
+
+    FILE *fp = fopen(filename, "w");
+    for (int i = 0; i <= bvp.J; i++) {
+        double x = ((double) i)/bvp.J;
+        fprintf(fp, "%f\t%0.15f\t%0.15f\n", x, U1[i], u(x,t-bvp.dt));
+    }
+    fclose(fp);
+    
+    free(U1);
+    free(U2);
 }

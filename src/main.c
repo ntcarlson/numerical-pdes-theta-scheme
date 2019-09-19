@@ -19,50 +19,62 @@ double exact_solution(double x, double t) {
     return u;
 }
 
+void error_analysis(struct bvp_t bvp, char *output, double mu, double nu) {
+    int max_J = 80;
+    FILE *fp = fopen(output, "w"); 
+    for (bvp.J = 10; bvp.J <= max_J; bvp.J += 2) {
+        double dx = 1.0/bvp.J;
+        bvp.dt = fmax(mu*dx*dx, nu*dx);
+        double err = theta_scheme(bvp, exact_solution);
+        fprintf(fp, "%ld\t%f\t%0.9f\n", bvp.J, bvp.J/bvp.dt, log10(err));
+    }
+    fclose(fp);
+}
+
 int main() {
     int max_J = 80;
-    struct bvp_t bvp;
-    bvp.IC = initial_condition;
-    bvp.stop_time = 1;
     { // theta = 0, mu = 1/2
-        FILE *fp = fopen("analysis/1.txt", "w"); 
-        bvp.theta = 0;
         double mu = 0.5;
-        for (bvp.J = 10; bvp.J <= max_J; bvp.J += 2) {
-            double dx = 1.0/((double) bvp.J);
-            bvp.dt = mu*dx*dx;
-            double err = theta_scheme(bvp, exact_solution);
-            fprintf(fp, "%d\t%f\t%0.9f\n", bvp.J, bvp.J/bvp.dt, log10(err));
-        }
-        fclose(fp);
+        struct bvp_t bvp;
+        bvp.IC = initial_condition;
+        bvp.stop_time = 1;
+        bvp.theta = 0;
+        error_analysis(bvp, "analysis/1_err.txt", mu, 0);
+
+        bvp.J = max_J;
+        bvp.dt = mu/(bvp.J*bvp.J);
+        bvp.stop_time = 0.5;
+        plot_solution(bvp, exact_solution, "analysis/1_sol.txt");
     }
 
     printf("\n");
     { // theta = 1, mu = 5
-        FILE *fp = fopen("analysis/2.txt", "w"); 
-        bvp.theta = 1;
         double mu = 5;
-        for (bvp.J = 10; bvp.J <= max_J; bvp.J += 2) {
-            double dx = 1.0/((double) bvp.J);
-            bvp.dt = mu*dx*dx;
-            double err = theta_scheme(bvp, exact_solution);
-            fprintf(fp, "%d\t%f\t%0.9f\n", bvp.J, bvp.J/bvp.dt, log10(err));
-        }
-        fclose(fp);
+        struct bvp_t bvp;
+        bvp.IC = initial_condition;
+        bvp.stop_time = 1;
+        bvp.theta = 1;
+        error_analysis(bvp, "analysis/2_err.txt", mu, 0);
+
+        bvp.J = max_J;
+        bvp.dt = mu/(bvp.J*bvp.J);
+        bvp.stop_time = 0.5;
+        plot_solution(bvp, exact_solution, "analysis/2_sol.txt");
     }
 
     printf("\n");
     { // theta = 0.5, nu = 1/20
-        FILE *fp = fopen("analysis/3.txt", "w"); 
-        bvp.theta = 0.5;
         double nu = 0.05;
-        for (bvp.J = 10; bvp.J <= max_J; bvp.J += 2) {
-            double dx = 1.0/((double) bvp.J);
-            bvp.dt = nu*dx;
-            double err = theta_scheme(bvp, exact_solution);
-            fprintf(fp, "%d\t%f\t%0.9f\n", bvp.J, bvp.J/bvp.dt, log10(err));
-        }
-        fclose(fp);
+        struct bvp_t bvp;
+        bvp.IC = initial_condition;
+        bvp.stop_time = 1;
+        bvp.theta = 0.5;
+        error_analysis(bvp, "analysis/3_err.txt", 0, nu);
+
+        bvp.J = max_J;
+        bvp.dt = nu/bvp.J;
+        bvp.stop_time = 0.5;
+        plot_solution(bvp, exact_solution, "analysis/3_sol.txt");
     }
 
 }
